@@ -1,6 +1,6 @@
 import argparse
 import os
-from trainers import SourceDomainTrainer, SourceDomainTrainerClassification
+from trainers import SourceDomainTrainer
 
 from options import get_source_segmentor_options
 
@@ -26,8 +26,5 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train Segmentor on Source Images')
     opt_style = get_source_segmentor_options(parser)
     ensure_dirs(opt_style.checkpoints_dir)
-    if opt_style.dataset_mode == 'skinlesion':
-        trainer = SourceDomainTrainerClassification(opt_style)
-    else:
-        trainer = SourceDomainTrainer(opt_style)
+    trainer = SourceDomainTrainer(opt_style)
     trainer.launch()

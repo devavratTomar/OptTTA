@@ -43,7 +43,7 @@ STRING_TO_CLASS = {
     'RandomScaledCenterCrop': RandomScaledCenterCrop
 }
 
-class TTDAFigures():
+class OptTTA():
     def __init__(self, opt):
         self.opt = opt
         print("Test Time Data Augmentation")
@@ -180,7 +180,7 @@ class TTDAFigures():
         spatial_augmentors = [aug for aug in augmentors if type(aug).__name__ in SPATIAL_AUGMENTORS]
         
         predictions_volume = []
-        
+        uncertainties_volume = []        
         ###### For visualization ######
         viz_preds = []
         viz_augs = []
@@ -222,19 +222,29 @@ class TTDAFigures():
             # gather all predictions
             predictions = torch.cat(predictions, dim=0)
             predictions = torch.softmax(predictions, dim=1)
+
+            prediction_labels = torch.argmax(predictions, dim=1, keepdim=False)
+            labels_frequency = torch.Tensor()
+            for l in range(predictions.shape[1]):
+                frequency_l = torch.sum(prediction_labels==l, dim=0, keepdim=True)/k
+                labels_frequency = torch.cat([labels_frequency, frequency_l])
+
+            uncertainties = -torch.mean(labels_frequency*torch.log(labels_frequency + 1e-6), dim=0, keepdim=True)
             predictions = torch.mean(predictions, dim=0, keepdim=True)
 
             predictions_volume.append(predictions)
+            uncertainties_volume.append(uncertainties)
             ## end for i loop
         
         # gather predictions of all images of the volume
         predictions_volume = torch.cat(predictions_volume, dim=0)
+        uncertainties_volume = torch.cat(uncertainties_volume, dim=0)
 
         # visualizations
         viz_augs = torch.cat(viz_augs, dim=0)
         viz_preds = torch.cat(viz_preds, dim=0)
         # self.unet.eval()
-        return predictions_volume, viz_preds, viz_augs
+        return predictions_volume, uncertainties_volume, viz_preds, viz_augs
 
     def get_slice_index(self, img, threshold):
         out = []
@@ -251,20 +261,6 @@ class TTDAFigures():
         
         return out
 
-    @torch.no_grad()
-    def perform_predictions(self, target_image, sample_size=16):
-        ## trick if there are a lot of images
-        tmp = []
-        for j in range(0, target_image.size()[0], sample_size):
-            pred = self.unet(target_image[j:(j+sample_size)]).detach().cpu()
-            pred = torch.argmax(pred, dim=1, keepdim=True)
-            tmp.append(pred)
-        
-        pred = torch.cat(tmp, dim=0)
-
-        return pred
-
-    
     def optimize_augmentors(self, target_image, augmentors_list, optimizer, n_steps, sample_size):
         ## Augmentors should be on GPU
         print("Optimizing parameters for Augmentations: {}".format(', '.join([type(n).__name__ for n in augmentors_list])))
@@ -274,7 +270,14 @@ class TTDAFigures():
             aug_visuals = []
             loss_curve = []
 
-            pred = self.perform_predictions(target_image)
+            ## trick if there are a lot of images
+            tmp = []
+            for j in range(0, target_image.size()[0], sample_size):
+                pred = self.unet(target_image[j:(j+sample_size)]).detach().cpu()
+                pred = torch.argmax(pred, dim=1, keepdim=True)
+                tmp.append(pred)
+            
+            pred = torch.cat(tmp, dim=0)
             pred_visuals.append(pred)
             aug_visuals.append(target_image.detach().cpu())
 
@@ -321,14 +324,8 @@ class TTDAFigures():
             # visualizations
             if DEBUG:
                 if i % 50 == 0:
-                    with torch.no_grad():
-                        aug_imgs_test = target_image
-                        for aug in augmentors_list:
-                            aug_imgs_test = aug(aug_imgs_test).detach()
-
-                        pred = self.perform_predictions(aug_imgs_test)
-                        pred_visuals.append(pred)
-                        aug_visuals.append(aug_imgs_test.detach().cpu())
+                    pred_visuals.append(torch.argmax(pred, dim=1, keepdim=True))
+                    aug_visuals.append(aug_imgs)
 
         if DEBUG:
             return torch.cat(pred_visuals, dim=0), torch.cat(aug_visuals, dim=0), loss_curve
@@ -419,8 +416,8 @@ class TTDAFigures():
             else:
                 pred_visuals, aug_visuals, loss_curve = self.optimize_augmentors(target_image, augmentations, optimizer, n_steps, batch_size)
 
-                self.visualize_segmentations(aug_visuals, pred_visuals, policy_name, target_image_name, nrows=target_image.size()[0])
-                self.visualize_losses(loss_curve, policy_name, target_image_name, True)
+                self.visualize_segmentations(aug_visuals, pred_visuals, policy_name, target_image_name)
+                self.visualize_losses(loss_curve, policy_name, target_image_name)
 
             optimized_subpolicies.append(augmentations)
             subpolicies_optimizers_state_dicts.append(optimizer.state_dict() if optimizer else None)
@@ -436,6 +433,7 @@ class TTDAFigures():
 
         best_policy_indices = np.argsort(global_policy_losses)[:best_k_policies]
         all_sub_policy_mean_predictions = {}
+        all_sub_policy_uncertainty_estimation = {}
         all_sub_policy_viz_aug = {}
         all_sub_policy_viz_pred = {}
 
@@ -446,8 +444,9 @@ class TTDAFigures():
             print('Loss for policy %s %f'% (policy_name, global_policy_losses[i]))
             names_opt_sub_polices.append(policy_name)
 
-            mean_pred, viz_preds, viz_augs = self.ensemble_predictions(optimized_subpolicies[i], target_image)
+            mean_pred, uncertainty_pred, viz_preds, viz_augs = self.ensemble_predictions(optimized_subpolicies[i], target_image)
             all_sub_policy_mean_predictions[policy_name] = mean_pred
+            all_sub_policy_uncertainty_estimation[policy_name] = uncertainty_pred
 
             ## visualizations
             all_sub_policy_viz_aug[policy_name] = viz_augs
@@ -462,6 +461,8 @@ class TTDAFigures():
         final_prediction = torch.mean(final_prediction, dim=0, keepdim=False)
         final_prediction_labels = torch.argmax(final_prediction, dim=1)
 
+        uncertainty_estimation = torch.stack(list(all_sub_policy_uncertainty_estimation.values()), dim=0)
+        uncertainty_estimation = torch.mean(uncertainty_estimation, dim=0, keepdim=False)
 
         # save opt subpolicy names
         if not os.path.exists(OPT_POLICY_CHECKPOINT):
@@ -470,33 +471,25 @@ class TTDAFigures():
                     f.write("%s\n"%line)
 
 
-        return final_prediction_labels, final_prediction, all_sub_policy_viz_aug, all_sub_policy_viz_pred
+        return final_prediction_labels, final_prediction, uncertainty_estimation, all_sub_policy_viz_aug, all_sub_policy_viz_pred
 
 
-    def visualize_losses(self, x, policy_name, image_name, final_only):
+    def visualize_losses(self, x, policy_name, image_name):
         x = np.array(x)
-        if final_only:
-            x = x[:, -1:]
+        legend = list(self.metric_tracker.current_metrics().keys())
+
         for i in range(x.shape[1]):
             plt.plot(np.arange(x.shape[0]), x[:, i])
-        
-        if not final_only:
-            legend = list(self.metric_tracker.current_metrics().keys())
-            plt.legend(legend)
-        else:
-            plt.title("Evolution of a sub-policy during optimization")
-            plt.xlabel('Iteration')
-            plt.ylabel(r'$\mathcal{L}_{\mathrm{TTDA}}$')
-        
+
+        plt.legend(legend)
         plt.grid(True)
-        plt.xticks(np.arange(0, x.shape[0] + 1, 100))
         ensure_dir(os.path.join(self.opt.checkpoints_source_free_da, 'visuals', 'loss_curves', policy_name))
-        plt.savefig(os.path.join(self.opt.checkpoints_source_free_da, 'visuals', 'loss_curves', policy_name, image_name + '.pdf'))
+        plt.savefig(os.path.join(self.opt.checkpoints_source_free_da, 'visuals', 'loss_curves', policy_name, image_name + '.png'))
         plt.clf()
 
-    def visualize_segmentations(self, imgs, segs, policy_name, img_name, nrows):
-        img_grid = tvu.make_grid(imgs, nrow=nrows, padding=0)
-        seg_grid = tvu.make_grid(segs, nrow=nrows, padding=0)[0] # make_grid makes the channel size to 3
+    def visualize_segmentations(self, imgs, segs, policy_name, img_name):
+        img_grid = tvu.make_grid(imgs, nrow=4)
+        seg_grid = tvu.make_grid(segs, nrow=4)[0] # make_grid makes the channel size to 3
         overlay_grid = overlay_segs(img_grid, seg_grid)
 
         ensure_dir(os.path.join(self.opt.checkpoints_source_free_da, 'visuals', 'segmentations', policy_name))
@@ -504,11 +497,11 @@ class TTDAFigures():
         tvu.save_image(0.5*img_grid + 0.5, os.path.join(self.opt.checkpoints_source_free_da, 'visuals', 'segmentations', policy_name, img_name + '_img_' + '.png'))
         tvu.save_image(getcolorsegs(seg_grid), os.path.join(self.opt.checkpoints_source_free_da, 'visuals', 'segmentations', policy_name, img_name + '_seg_' + '.png'))
 
-    def visualize_imgs(self, dict_imgs, img_name, nrows):
+    def visualize_imgs(self, dict_imgs, img_name):
         ensure_dir(os.path.join(self.opt.checkpoints_source_free_da, 'visuals', 'images'))
 
         for k, v in dict_imgs:
-            img_grid = tvu.make_grid(0.5*v + 0.5, nrow=nrows, padding=0)
+            img_grid = tvu.make_grid(0.5*v + 0.5, nrow=4)
             tvu.save_image(img_grid, os.path.join(self.opt.checkpoints_source_free_da, 'visuals', 'images', k + '_' + img_name + '.png'))
 
 
@@ -543,21 +536,26 @@ class TTDAFigures():
             # check effective batch size
             predictions = []
             predictions_prob = []
+            uncertainties = []
             BATCH = img.size()[0]
             for i in range(0, img.shape[0], BATCH):
-                pred, pred_probs, all_sub_policy_mean_predictions, all_sub_policy_aug_imgs = self.test_time_optimize(img[i:(i + BATCH)], all_imgs[i])
+                pred, pred_probs, uncertainty_estimation, all_sub_policy_mean_predictions, all_sub_policy_aug_imgs = self.test_time_optimize(img[i:(i + BATCH)], all_imgs[i])
                 viz = [overlay_segs(img[i:(i + BATCH)].detach().cpu(), seg[i:(i + BATCH)].detach().cpu()), overlay_segs(img[i:(i + BATCH)].detach().cpu(), pred.detach().cpu())]
                 viz = torch.cat(viz, dim=0)
-                viz = tvu.make_grid(viz, nrow=BATCH, padding=0)
+                viz = tvu.make_grid(viz, nrow=BATCH)
                 tvu.save_image(viz, os.path.join(self.opt.checkpoints_source_free_da, 'visuals', 'final_predictions', all_imgs[i] + '.png'))
+                uncertainties.append(uncertainty_estimation)
                 predictions.append(pred)
                 predictions_prob.append(pred_probs)
             
+            uncertainties = torch.cat(uncertainties, dim=0)
             predictions = torch.cat(predictions, dim=0)
             predictions_prob = torch.cat(predictions_prob, dim=0)
+            print(uncertainties.shape)
             print(predictions.shape)
             print(predictions_prob.shape)
 
             for i in range(len(all_segs)):
+                self.save_pred_numpy(uncertainties[i], 'uncertainties', all_segs[i])
                 self.save_pred_numpy(predictions[i], 'predictions', all_segs[i])
                 self.save_pred_numpy(predictions_prob[i], 'predictions_prob', all_segs[i])

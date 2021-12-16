@@ -1,3 +1,1 @@
-# source-free-da
-Source Free Test Time Domain Adaptation
-# OptTTA
+# OptTTA: Learnable Test-Time Augmentation for Source-Free Medical Image Segmentation Under Domain Shift

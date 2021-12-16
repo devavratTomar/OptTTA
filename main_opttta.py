@@ -1,8 +1,7 @@
 from options import get_source_free_domain_adaptaion_options
 import os
 
-from trainers import SourceFreeDomainAdaptorUniversal, SourceFreeDomainAdaptorUniversalPolicyGradient, TestTimePolicySearch
-from trainer_policy import TTDA, TTDAFigures
+from trainer_policy import OptTTA
 import argparse
 
 def ensure_dirs(checkpoints_dir):
@@ -22,5 +21,5 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Source Free Adaptation to test time Image.')
     opt_style = get_source_free_domain_adaptaion_options(parser)
     ensure_dirs(opt_style.checkpoints_source_free_da)
-    trainer = TTDA(opt_style)
+    trainer = OptTTA(opt_style)
     trainer.launch()

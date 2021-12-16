@@ -1,2 +1,1 @@
-from .ttda import TTDA
-from .ttda_figures import TTDAFigures
+from .opttta import OptTTA
