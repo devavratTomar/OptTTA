@@ -1,6 +1,6 @@
 # OptTTA: Learnable Test-Time Augmentation for Source-Free Medical Image Segmentation Under Domain Shift
 
-This repository contains the Pytorch implementation of the proposed method _OptTTA: Learnable Test-Time Augmentation for Source-Free Medical Image Segmentation Under Domain Shift_, which has been submitted to MIDL 2022.
+This repository contains the Pytorch implementation of the proposed method _OptTTA: Learnable Test-Time Augmentation for Source-Free Medical Image Segmentation Under Domain Shift_, which has been submitted to MIDL 2022 https://openreview.net/forum?id=B6HdQaY_iR.
 
 
 
