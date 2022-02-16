@@ -20,8 +20,8 @@ def get_source_free_domain_adaptaion_options(parser):
 
     ## Networks
     parser.add_argument("--n_steps", default=1000, type=int)
-    parser.add_argument("--alpha_1", default=1, type=float)
-    parser.add_argument("--alpha_2", default=1, type=float)
+    parser.add_argument("--alpha_1", default=1.0, type=float)
+    parser.add_argument("--alpha_2", default=1.0, type=float)
     parser.add_argument("--n_augs", default=5, type=int)
     parser.add_argument("--k", default=128, type=int)
     parser.add_argument("--sp_selection_metric", default="All", type=str, choices=("All, BN, Ent"))
