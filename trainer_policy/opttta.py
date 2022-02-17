@@ -69,8 +69,8 @@ class OptTTA():
         self.criterian_l1 = torch.nn.L1Loss()
         self.criterian_l2 = torch.nn.MSELoss()
 
-        self.criterian_nuclear = losses.NuclearNorm()
-        self.criterian_countour = losses.ContourRegularizationLoss(2)
+        self.criterian_entropy = losses.EntropyLoss()
+        self.criterian_entropy_cm = losses.EntropyClassMarginals()
 
         # runnign_vars, means
         self.running_means, self.running_vars = self.get_segmentor_bn_stats()
@@ -149,9 +149,8 @@ class OptTTA():
     def smooth_loss(self, x, feats):
         loss = {}
         p = torch.softmax(x, dim=1)
-        # entropy maps
-        entropy = torch.sum(-p * torch.log(p + 1e-6), dim=1).mean() # E[p log p]
-        loss['entropy'] = 100*entropy
+        loss['entropy'] = self.criterian_entropy(p)
+        
         # match bn stats
         loss_bn = 0
         for i, (f, m, v) in enumerate(zip(feats, self.running_means, self.running_vars)):
@@ -162,12 +161,9 @@ class OptTTA():
 
                 loss_bn += self.criterian_l2(current_mean, m) + self.criterian_l2(cuurent_var, v)
 
-        loss['batchnorm_consistency'] = loss_bn*self.opt.alpha_1
-
-        avg_p = p.mean(dim=[0, 2, 3]) # avg along the pixels dim h x w and batch
-        entropy_cm = torch.sum(avg_p * torch.log(avg_p + 1e-6))
+        loss['batchnorm_consistency'] = self.opt.alpha_1*loss_bn
         
-        loss['entropy_class_marginal'] = entropy_cm * self.opt.alpha_2
+        loss['entropy_class_marginal'] = self.opt.alpha_2*self.criterian_entropy_cm(p)
         
         return loss
     

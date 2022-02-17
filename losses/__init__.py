@@ -1,3 +1,4 @@
+from turtle import forward
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -53,8 +54,21 @@ class MumfordShahLoss(nn.Module):
         
         return loss
 
+class EntropyLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+    
+    def forward(self, probs):
+        return torch.sum(-probs * torch.log(probs + 1e-6), dim=1).mean()
 
+class EntropyClassMarginals(nn.Module):
+    def __init__(self):
+        super().__init__()
 
+    def forward(self, probs):
+        avg_p = probs.mean(dim=[2, 3]) # avg along the pixels dim h x w -> size is batch x n_classes
+        entropy_cm = torch.sum(avg_p * torch.log(avg_p + 1e-6), dim=1).mean()
+        return entropy_cm
 
 class CrossEntropyLossWeighted(nn.Module):
     """

@@ -119,12 +119,6 @@ for patient in patient_roots:
         all_gts = torch.cat([all_gts, gt])
         
     all_classes = np.arange(opt.n_classes)
-    
-    # mask = all_preds != 0
-    # mask = get_largest_component(mask.cpu().numpy())
-    # mask = torch.from_numpy(mask)
-
-    # all_preds = all_preds * mask
 
     all_gts = all_gts.unsqueeze(0)
     all_preds = all_preds.unsqueeze(0)
